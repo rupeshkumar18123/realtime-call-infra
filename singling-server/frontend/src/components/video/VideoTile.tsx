@@ -43,8 +43,6 @@
 
 
 
-
-
 'use client';
 
 import { useEffect, useRef } from 'react';
@@ -80,7 +78,10 @@ export function VideoTile({
       try {
         await video.play();
       } catch (err) {
-        console.error('Video autoplay failed:', err);
+        console.error(
+          'Video autoplay failed:',
+          err,
+        );
       }
     };
 
@@ -97,7 +98,7 @@ export function VideoTile({
     <div
       className={`relative bg-black rounded-xl overflow-hidden ${className}`}
     >
-      {stream && videoEnabled ? (
+      {stream ? (
         <video
           ref={videoRef}
           autoPlay
@@ -109,7 +110,9 @@ export function VideoTile({
         <div className="flex items-center justify-center w-full h-full bg-zinc-900 text-zinc-500">
           <div className="flex flex-col items-center gap-2">
             <VideoOff size={40} />
-            <span className="text-sm">Camera Off</span>
+            <span className="text-sm">
+              Camera Off
+            </span>
           </div>
         </div>
       )}
@@ -130,5 +133,3 @@ export function VideoTile({
     </div>
   );
 }
-//   );
-// }
