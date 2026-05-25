@@ -46,13 +46,21 @@ export function useWebRTC(
         setLocalStream(stream);
       }
 
+      console.log(
+        'Local tracks:',
+        stream
+          .getTracks()
+          .map(
+            (t: MediaStreamTrack) => t.kind,
+          ),
+      );
+
       return stream;
     }, [localStream, setLocalStream]);
 
   const createPeerConnection = useCallback(
     async (targetUserId: string) => {
-      // IMPORTANT
-      // NEVER recreate existing PC
+      // DO NOT recreate existing PC
       if (pcRef.current) {
         return pcRef.current;
       }
@@ -104,21 +112,17 @@ export function useWebRTC(
         },
       );
 
-      // IMPORTANT
       // ADD TRACKS BEFORE OFFER
       const stream =
         await getOrCreateLocalStream();
 
-      // stream.getTracks().forEach((track) => {
-      //   service.addTrack(track, stream);
-      // });
-
-
       stream
-  .getTracks()
-  .forEach((track: MediaStreamTrack) => {
-    service.addTrack(track, stream);
-  });
+        .getTracks()
+        .forEach(
+          (track: MediaStreamTrack) => {
+            service.addTrack(track, stream);
+          },
+        );
 
       return service;
     },
@@ -137,7 +141,8 @@ export function useWebRTC(
 
         if (!socket) return;
 
-        setStatus('calling');
+        // FIXED
+        setStatus('connecting');
 
         setRemotePeerId(targetUserId);
 
