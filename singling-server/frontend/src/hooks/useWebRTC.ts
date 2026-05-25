@@ -47,7 +47,7 @@ export function useWebRTC(
   }, []);
 
   const ensureLocalStream = useCallback(async () => {
-    let stream = localStream;
+    let stream = localStream as MediaStream | null;
 
     if (!stream) {
       stream =
@@ -61,7 +61,9 @@ export function useWebRTC(
 
     console.log(
       'Local tracks:',
-      stream.getTracks().map((t) => t.kind),
+      stream
+        .getTracks()
+        .map((t: MediaStreamTrack) => t.kind),
     );
 
     return stream;
@@ -352,7 +354,6 @@ export function useWebRTC(
     hangUp,
   };
 }
-
 
 // 'use client';
 // import { useRef, useCallback, useEffect } from 'react';
