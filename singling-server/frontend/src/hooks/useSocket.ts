@@ -18,7 +18,7 @@ export function useSocket() {
     const socket = getSocket(user.token);
     bound.current = true;
 
-    socket.on('connect', () => setStatus('connected'));
+    socket.on('connect', () => setStatus('idle'));  // socket connected ≠ call connected
     socket.on('disconnect', () => setStatus('disconnected'));
     socket.on('connect_error', () => setStatus('error'));
 
