@@ -1,16 +1,16 @@
 # Frontend Deployment Guide
 
-## Vercel (Recommended)
+## Vercel
 
-1. Push to GitHub
-2. Import repo at [vercel.com](https://vercel.com)
-3. Set root directory to `frontend`
-4. Add environment variables:
-   ```
-   NEXT_PUBLIC_API_URL=https://your-backend.railway.app
-   NEXT_PUBLIC_SOCKET_URL=https://your-backend.railway.app
-   ```
-5. Deploy
+1. Deploy `frontend` directory to Vercel.
+2. Add env vars:
+
+```env
+NEXT_PUBLIC_API_URL=https://your-backend-domain
+NEXT_PUBLIC_SOCKET_URL=https://your-backend-domain
+```
+
+3. Ensure backend `CORS_ORIGINS` includes your Vercel URL.
 
 ## Local Production Build
 
@@ -19,8 +19,9 @@ npm run build
 npm start
 ```
 
-## Production Recommendations
+## Production Checklist
 
-- Backend must have `CORS_ORIGINS` set to your Vercel domain
-- Use `wss://` (WebSocket Secure) in production — Socket.IO handles this automatically when the server URL is `https://`
-- Set `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_SOCKET_URL` to the same Railway/backend URL
+- Frontend and backend are both on HTTPS.
+- Socket URL matches backend public domain.
+- Browser permissions are enabled for camera/mic.
+- TURN is configured for restrictive NAT networks.
