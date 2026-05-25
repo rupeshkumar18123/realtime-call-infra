@@ -8,36 +8,56 @@ import { SOCKET_EVENTS } from '@/types/events';
 
 export function useWebRTC(roomId: string, localUserId: string) {
   const serviceRef = useRef<WebRTCService | null>(null);
+  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const remoteDescSetRef = useRef(false);
   const { setRemoteStream, setStatus, setRemotePeerId, reset } = useCallStore();
-  const localStream = useMediaStore((s) => s.localStream);
+  const localStream = useMediaStore((s:any) => s.localStream);
+  // Keep a ref so callbacks always see the latest stream
+  const localStreamRef = useRef(localStream);
+  useEffect(() => { localStreamRef.current = localStream; }, [localStream]);
 
   const getService = useCallback(() => {
-    if (!serviceRef.current) {
-      serviceRef.current = new WebRTCService();
-    }
+    if (!serviceRef.current) serviceRef.current = new WebRTCService();
     return serviceRef.current;
   }, []);
+
+  const flushCandidates = useCallback(async () => {
+    const svc = getService();
+    for (const c of pendingCandidatesRef.current) {
+      await svc.addIceCandidate(c);
+    }
+    pendingCandidatesRef.current = [];
+  }, [getService]);
 
   const createPC = useCallback((targetUserId: string) => {
     const socket = getActiveSocket();
     const svc = getService();
+    remoteDescSetRef.current = false;
+    pendingCandidatesRef.current = [];
 
     const pc = svc.create(
-      (candidate) => {
+      (candidate:any) => {
         socket?.emit(SOCKET_EVENTS.ICE_CANDIDATE, { roomId, targetUserId, candidate });
       },
-      (event) => {
+      (event:any) => {
         if (event.streams[0]) setRemoteStream(event.streams[0]);
       },
-      (state) => {
+      (state:any) => {
         if (state === 'connected') setStatus('connected');
         if (state === 'disconnected' || state === 'failed') setStatus('disconnected');
       },
     );
 
-    if (localStream) svc.addStream(localStream);
+    // Use ref so we always get the current stream even if called before state updates
+    if (localStreamRef.current) svc.addStream(localStreamRef.current);
     return pc;
-  }, [roomId, localStream, getService, setRemoteStream, setStatus]);
+  }, [roomId, getService, setRemoteStream, setStatus]);
+
+  const setRemoteDesc = useCallback(async (sdp: RTCSessionDescriptionInit) => {
+    await getService().setRemoteDescription(sdp);
+    remoteDescSetRef.current = true;
+    await flushCandidates();
+  }, [getService, flushCandidates]);
 
   const initiateCall = useCallback(async (targetUserId: string) => {
     const socket = getActiveSocket();
@@ -49,7 +69,6 @@ export function useWebRTC(roomId: string, localUserId: string) {
     socket.emit(SOCKET_EVENTS.OFFER, { roomId, targetUserId, sdp: offer });
   }, [roomId, createPC, getService, setStatus, setRemotePeerId]);
 
-  // Register socket listeners for incoming signaling
   useEffect(() => {
     const socket = getActiveSocket();
     if (!socket) return;
@@ -58,22 +77,28 @@ export function useWebRTC(roomId: string, localUserId: string) {
       setStatus('connecting');
       setRemotePeerId(fromUserId);
       createPC(fromUserId);
-      await getService().setRemoteDescription(sdp);
+      await setRemoteDesc(sdp);
       const answer = await getService().createAnswer();
       socket.emit(SOCKET_EVENTS.ANSWER, { roomId, targetUserId: fromUserId, sdp: answer });
     };
 
     const onAnswer = async ({ sdp }: { sdp: RTCSessionDescriptionInit }) => {
-      await getService().setRemoteDescription(sdp);
+      await setRemoteDesc(sdp);
     };
 
     const onIce = async ({ candidate }: { candidate: RTCIceCandidateInit }) => {
-      await getService().addIceCandidate(candidate);
+      if (remoteDescSetRef.current) {
+        await getService().addIceCandidate(candidate);
+      } else {
+        pendingCandidatesRef.current.push(candidate);
+      }
     };
 
     const onCallEnded = () => {
       serviceRef.current?.close();
       serviceRef.current = null;
+      remoteDescSetRef.current = false;
+      pendingCandidatesRef.current = [];
       reset();
     };
 
@@ -90,17 +115,18 @@ export function useWebRTC(roomId: string, localUserId: string) {
       socket.off(SOCKET_EVENTS.CALL_ENDED, onCallEnded);
       socket.off(SOCKET_EVENTS.USER_DISCONNECTED, onCallEnded);
     };
-  }, [roomId, createPC, getService, reset, setStatus, setRemotePeerId]);
+  }, [roomId, createPC, getService, setRemoteDesc, reset, setStatus, setRemotePeerId]);
 
   const hangUp = useCallback(() => {
     const socket = getActiveSocket();
     socket?.emit(SOCKET_EVENTS.CALL_ENDED, { roomId });
     serviceRef.current?.close();
     serviceRef.current = null;
+    remoteDescSetRef.current = false;
+    pendingCandidatesRef.current = [];
     reset();
   }, [roomId, reset]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       serviceRef.current?.close();
