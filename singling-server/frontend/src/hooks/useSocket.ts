@@ -9,7 +9,11 @@ import { Participant } from '@/types';
 
 export function useSocket() {
   const user = useAuthStore((s) => s.user);
-  const { addParticipant, removeParticipant, setParticipants } = useRoomStore();
+  const {
+    addParticipant,
+    removeParticipant,
+    setParticipants,
+  } = useRoomStore();
   const { setStatus } = useCallStore();
   const bound = useRef(false);
 
@@ -18,20 +22,43 @@ export function useSocket() {
     const socket = getSocket(user.token);
     bound.current = true;
 
-    socket.on('connect', () => setStatus('idle'));  // socket connected ≠ call connected
-    socket.on('disconnect', () => setStatus('disconnected'));
-    socket.on('connect_error', () => setStatus('error'));
+    // Socket transport up does not mean media call established.
+    socket.on('connect', () => undefined);
+    socket.on('disconnect', () =>
+      setStatus('disconnected'),
+    );
+    socket.on('connect_error', () =>
+      setStatus('error'),
+    );
 
-    socket.on(SOCKET_EVENTS.ROOM_JOINED, ({ participants }: { participants: Participant[] }) => {
-      setParticipants(participants);
-    });
-    socket.on(SOCKET_EVENTS.USER_CONNECTED, (p: Participant) => addParticipant(p));
-    socket.on(SOCKET_EVENTS.USER_DISCONNECTED, ({ userId }: { userId: string }) =>
-      removeParticipant(userId),
+    socket.on(
+      SOCKET_EVENTS.ROOM_JOINED,
+      ({
+        participants,
+      }: {
+        participants: Participant[];
+      }) => {
+        setParticipants(participants);
+      },
+    );
+    socket.on(
+      SOCKET_EVENTS.USER_CONNECTED,
+      (p: Participant) => addParticipant(p),
+    );
+    socket.on(
+      SOCKET_EVENTS.USER_DISCONNECTED,
+      ({ userId }: { userId: string }) =>
+        removeParticipant(userId),
     );
 
     socket.connect();
-  }, [user, setStatus, setParticipants, addParticipant, removeParticipant]);
+  }, [
+    user,
+    setStatus,
+    setParticipants,
+    addParticipant,
+    removeParticipant,
+  ]);
 
   const disconnect = useCallback(() => {
     disconnectSocket();
@@ -39,7 +66,9 @@ export function useSocket() {
   }, []);
 
   useEffect(() => {
-    return () => { disconnect(); };
+    return () => {
+      disconnect();
+    };
   }, [disconnect]);
 
   return { connect, disconnect };

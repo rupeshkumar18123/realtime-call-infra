@@ -112,7 +112,6 @@ export class SignalingHandler {
   handleCallEnded(socket: AuthenticatedSocket, payload: CallEndedPayload): void {
     const { roomId } = payload;
     socket.to(roomId).emit(SOCKET_EVENTS.CALL_ENDED, { roomId });
-    this._leaveRoom(socket, roomId);
   }
 
   handleDisconnect(socket: AuthenticatedSocket): void {
