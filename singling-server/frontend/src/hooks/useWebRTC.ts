@@ -20,6 +20,10 @@ export function useWebRTC(
   const remoteStreamRef = useRef<MediaStream>(
     new MediaStream(),
   );
+  const listenersBoundRef = useRef(false);
+  const boundSocketRef = useRef<ReturnType<
+    typeof getActiveSocket
+  > | null>(null);
 
   const localStream = useMediaStore(
     (s: any) => s.localStream,
@@ -237,116 +241,158 @@ export function useWebRTC(
   );
 
   useEffect(() => {
-    const socket = getActiveSocket();
-
-    if (!socket) return;
-
-    socket.on(
-      SOCKET_EVENTS.OFFER,
-      async ({ sdp, fromUserId }: any) => {
-        try {
-          console.log('Offer received');
-          setStatus('connecting');
-          setRemotePeerId(fromUserId);
-          const pc =
-            await createPeerConnection(
-              fromUserId,
-              true,
-            );
-
-          await applyRemoteDescription(sdp);
-
-          const answer =
-            await pc.createAnswer();
-
-          socket.emit(SOCKET_EVENTS.ANSWER, {
-            roomId,
-            targetUserId: fromUserId,
-            sdp: answer,
-          });
-
-          console.log('Answer sent');
-        } catch (error) {
-          console.error(error);
-        }
-      },
-    );
-
-    socket.on(
-      SOCKET_EVENTS.ANSWER,
-      async ({ sdp }: any) => {
-        try {
-          console.log('Answer received');
-
-          if (!pcRef.current) return;
-          await applyRemoteDescription(sdp);
-
-          console.log(
-            'Remote answer applied',
+    const onOffer = async ({
+      sdp,
+      fromUserId,
+    }: any) => {
+      try {
+        console.log('Offer received');
+        setStatus('connecting');
+        setRemotePeerId(fromUserId);
+        const pc =
+          await createPeerConnection(
+            fromUserId,
+            true,
           );
-        } catch (error) {
-          console.error(error);
-        }
-      },
-    );
 
-    socket.on(
+        await applyRemoteDescription(sdp);
+
+        const answer =
+          await pc.createAnswer();
+
+        const socket = getActiveSocket();
+        socket?.emit(SOCKET_EVENTS.ANSWER, {
+          roomId,
+          targetUserId: fromUserId,
+          sdp: answer,
+        });
+
+        console.log('Answer sent');
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    const onAnswer = async ({ sdp }: any) => {
+      try {
+        console.log('Answer received');
+
+        if (!pcRef.current) return;
+        await applyRemoteDescription(sdp);
+
+        console.log('Remote answer applied');
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    const onIceCandidate = async ({
+      candidate,
+    }: any) => {
+      try {
+        if (!pcRef.current) return;
+        if (!remoteDescSetRef.current) {
+          pendingIceCandidatesRef.current.push(
+            candidate,
+          );
+          return;
+        }
+        await pcRef.current.addIceCandidate(candidate);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    const onCallEnded = () => teardownCall();
+
+    const onUserDisconnected = ({
+      userId,
+    }: {
+      userId: string;
+    }) => {
+      if (
+        activePeerIdRef.current &&
+        userId === activePeerIdRef.current
+      ) {
+        teardownCall();
+      }
+    };
+
+    const bindListeners = () => {
+      const socket = getActiveSocket();
+      if (!socket || listenersBoundRef.current) {
+        return Boolean(socket);
+      }
+
+      socket.on(
+      SOCKET_EVENTS.OFFER,
+      onOffer,
+    );
+      socket.on(
+      SOCKET_EVENTS.ANSWER,
+      onAnswer,
+    );
+      socket.on(
       SOCKET_EVENTS.ICE_CANDIDATE,
-      async ({ candidate }: any) => {
-        try {
-          if (!pcRef.current) return;
-          if (!remoteDescSetRef.current) {
-            pendingIceCandidatesRef.current.push(
-              candidate,
-            );
-            return;
-          }
-          await pcRef.current.addIceCandidate(candidate);
-        } catch (error) {
-          console.error(error);
-        }
-      },
+      onIceCandidate,
     );
-
-    socket.on(
+      socket.on(
       SOCKET_EVENTS.CALL_ENDED,
-      teardownCall,
+      onCallEnded,
     );
-
-    socket.on(
+      socket.on(
       SOCKET_EVENTS.USER_DISCONNECTED,
-      ({ userId }: { userId: string }) => {
-        if (
-          activePeerIdRef.current &&
-          userId === activePeerIdRef.current
-        ) {
-          teardownCall();
-        }
-      },
+      onUserDisconnected,
     );
+      listenersBoundRef.current = true;
+      boundSocketRef.current = socket;
+      return true;
+    };
+
+    const alreadyBound = bindListeners();
+    let intervalId: ReturnType<
+      typeof setInterval
+    > | null = null;
+    if (!alreadyBound) {
+      intervalId = setInterval(() => {
+        if (bindListeners() && intervalId) {
+          clearInterval(intervalId);
+          intervalId = null;
+        }
+      }, 250);
+    }
 
     return () => {
-      socket.off(SOCKET_EVENTS.OFFER);
-
-      socket.off(SOCKET_EVENTS.ANSWER);
-
-      socket.off(
-        SOCKET_EVENTS.ICE_CANDIDATE,
-      );
-
-      socket.off(
-        SOCKET_EVENTS.CALL_ENDED,
-        teardownCall,
-      );
-
-      socket.off(
-        SOCKET_EVENTS.USER_DISCONNECTED,
-      );
+      if (intervalId) clearInterval(intervalId);
+      const socket = boundSocketRef.current;
+      if (socket) {
+        socket.off(
+          SOCKET_EVENTS.OFFER,
+          onOffer,
+        );
+        socket.off(
+          SOCKET_EVENTS.ANSWER,
+          onAnswer,
+        );
+        socket.off(
+          SOCKET_EVENTS.ICE_CANDIDATE,
+          onIceCandidate,
+        );
+        socket.off(
+          SOCKET_EVENTS.CALL_ENDED,
+          onCallEnded,
+        );
+        socket.off(
+          SOCKET_EVENTS.USER_DISCONNECTED,
+          onUserDisconnected,
+        );
+      }
+      listenersBoundRef.current = false;
+      boundSocketRef.current = null;
     };
   }, [
     roomId,
     createPeerConnection,
-    reset,
     setRemotePeerId,
     setStatus,
     applyRemoteDescription,
