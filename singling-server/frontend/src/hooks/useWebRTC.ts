@@ -27,6 +27,10 @@ export function useWebRTC(
     (state: any) => state.localStream,
   );
 
+  const setLocalStream = useMediaStore(
+    (state: any) => state.setLocalStream,
+  );
+
   const {
     setRemoteStream,
     setStatus,
@@ -41,6 +45,27 @@ export function useWebRTC(
 
     return serviceRef.current;
   }, []);
+
+  const ensureLocalStream = useCallback(async () => {
+    let stream = localStream;
+
+    if (!stream) {
+      stream =
+        await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        });
+
+      setLocalStream(stream);
+    }
+
+    console.log(
+      'Local tracks:',
+      stream.getTracks().map((t) => t.kind),
+    );
+
+    return stream;
+  }, [localStream, setLocalStream]);
 
   const flushPendingCandidates = useCallback(async () => {
     const service = getService();
@@ -57,7 +82,7 @@ export function useWebRTC(
   }, [getService]);
 
   const createPeerConnection = useCallback(
-    (targetUserId: string) => {
+    async (targetUserId: string) => {
       const socket = getActiveSocket();
 
       const service = getService();
@@ -79,7 +104,9 @@ export function useWebRTC(
             event.track.kind,
           );
 
-          remoteStreamRef.current.addTrack(event.track);
+          remoteStreamRef.current.addTrack(
+            event.track,
+          );
 
           setRemoteStream(remoteStreamRef.current);
         },
@@ -101,14 +128,19 @@ export function useWebRTC(
         },
       );
 
-      if (localStream) {
-        service.addStream(localStream);
-      }
+      // IMPORTANT FIX
+      const stream = await ensureLocalStream();
+
+      stream.getTracks().forEach((track) => {
+        service.addTrack(track, stream);
+      });
+
+      return service;
     },
     [
       roomId,
       getService,
-      localStream,
+      ensureLocalStream,
       setRemoteStream,
       setStatus,
     ],
@@ -125,9 +157,10 @@ export function useWebRTC(
 
         setRemotePeerId(targetUserId);
 
-        createPeerConnection(targetUserId);
+        await createPeerConnection(targetUserId);
 
-        const offer = await getService().createOffer();
+        const offer =
+          await getService().createOffer();
 
         socket.emit(SOCKET_EVENTS.OFFER, {
           roomId,
@@ -163,9 +196,11 @@ export function useWebRTC(
 
         setRemotePeerId(fromUserId);
 
-        createPeerConnection(fromUserId);
+        await createPeerConnection(fromUserId);
 
-        await getService().setRemoteDescription(sdp);
+        await getService().setRemoteDescription(
+          sdp,
+        );
 
         remoteDescSetRef.current = true;
 
@@ -317,7 +352,6 @@ export function useWebRTC(
     hangUp,
   };
 }
-
 
 
 // 'use client';
