@@ -11,24 +11,18 @@ export function useWebRTC(
   roomId: string,
   localUserId: string,
 ) {
-  const serviceRef = useRef<WebRTCService | null>(null);
+  const pcRef = useRef<WebRTCService | null>(null);
 
   const remoteStreamRef = useRef<MediaStream>(
     new MediaStream(),
   );
 
-  const pendingCandidatesRef = useRef<
-    RTCIceCandidateInit[]
-  >([]);
-
-  const remoteDescSetRef = useRef(false);
-
   const localStream = useMediaStore(
-    (state: any) => state.localStream,
+    (s: any) => s.localStream,
   );
 
   const setLocalStream = useMediaStore(
-    (state: any) => state.setLocalStream,
+    (s: any) => s.setLocalStream,
   );
 
   const {
@@ -38,56 +32,36 @@ export function useWebRTC(
     reset,
   } = useCallStore();
 
-  const getService = useCallback(() => {
-    if (!serviceRef.current) {
-      serviceRef.current = new WebRTCService();
-    }
+  const getOrCreateLocalStream =
+    useCallback(async () => {
+      let stream = localStream;
 
-    return serviceRef.current;
-  }, []);
+      if (!stream) {
+        stream =
+          await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
 
-  const ensureLocalStream = useCallback(async () => {
-    let stream = localStream as MediaStream | null;
-
-    if (!stream) {
-      stream =
-        await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
-
-      setLocalStream(stream);
-    }
-
-    console.log(
-      'Local tracks:',
-      stream
-        .getTracks()
-        .map((t: MediaStreamTrack) => t.kind),
-    );
-
-    return stream;
-  }, [localStream, setLocalStream]);
-
-  const flushPendingCandidates = useCallback(async () => {
-    const service = getService();
-
-    for (const candidate of pendingCandidatesRef.current) {
-      try {
-        await service.addIceCandidate(candidate);
-      } catch (error) {
-        console.error(error);
+        setLocalStream(stream);
       }
-    }
 
-    pendingCandidatesRef.current = [];
-  }, [getService]);
+      return stream;
+    }, [localStream, setLocalStream]);
 
   const createPeerConnection = useCallback(
     async (targetUserId: string) => {
+      // IMPORTANT
+      // NEVER recreate existing PC
+      if (pcRef.current) {
+        return pcRef.current;
+      }
+
       const socket = getActiveSocket();
 
-      const service = getService();
+      const service = new WebRTCService();
+
+      pcRef.current = service;
 
       remoteStreamRef.current = new MediaStream();
 
@@ -102,7 +76,7 @@ export function useWebRTC(
 
         (event) => {
           console.log(
-            'Track received:',
+            'Remote track:',
             event.track.kind,
           );
 
@@ -114,24 +88,26 @@ export function useWebRTC(
         },
 
         (state) => {
-          console.log('Connection state:', state);
+          console.log('PC State:', state);
 
           if (state === 'connected') {
             setStatus('connected');
           }
 
           if (
-            state === 'disconnected' ||
             state === 'failed' ||
-            state === 'closed'
+            state === 'closed' ||
+            state === 'disconnected'
           ) {
             setStatus('disconnected');
           }
         },
       );
 
-      // IMPORTANT FIX
-      const stream = await ensureLocalStream();
+      // IMPORTANT
+      // ADD TRACKS BEFORE OFFER
+      const stream =
+        await getOrCreateLocalStream();
 
       stream.getTracks().forEach((track) => {
         service.addTrack(track, stream);
@@ -141,10 +117,9 @@ export function useWebRTC(
     },
     [
       roomId,
-      getService,
-      ensureLocalStream,
       setRemoteStream,
       setStatus,
+      getOrCreateLocalStream,
     ],
   );
 
@@ -155,20 +130,24 @@ export function useWebRTC(
 
         if (!socket) return;
 
-        setStatus('connecting');
+        setStatus('calling');
 
         setRemotePeerId(targetUserId);
 
-        await createPeerConnection(targetUserId);
+        const pc =
+          await createPeerConnection(
+            targetUserId,
+          );
 
-        const offer =
-          await getService().createOffer();
+        const offer = await pc.createOffer();
 
         socket.emit(SOCKET_EVENTS.OFFER, {
           roomId,
           targetUserId,
           sdp: offer,
         });
+
+        console.log('Offer sent');
       } catch (error) {
         console.error(error);
       }
@@ -176,7 +155,6 @@ export function useWebRTC(
     [
       roomId,
       createPeerConnection,
-      getService,
       setStatus,
       setRemotePeerId,
     ],
@@ -187,138 +165,108 @@ export function useWebRTC(
 
     if (!socket) return;
 
-    const onOffer = async ({
-      sdp,
-      fromUserId,
-    }: any) => {
-      try {
-        console.log('Offer received');
+    socket.on(
+      SOCKET_EVENTS.OFFER,
+      async ({ sdp, fromUserId }: any) => {
+        try {
+          console.log('Offer received');
 
-        setStatus('connecting');
+          setRemotePeerId(fromUserId);
 
-        setRemotePeerId(fromUserId);
+          const pc =
+            await createPeerConnection(
+              fromUserId,
+            );
 
-        await createPeerConnection(fromUserId);
+          await pc.setRemoteDescription(sdp);
 
-        await getService().setRemoteDescription(
-          sdp,
-        );
+          const answer =
+            await pc.createAnswer();
 
-        remoteDescSetRef.current = true;
+          socket.emit(SOCKET_EVENTS.ANSWER, {
+            roomId,
+            targetUserId: fromUserId,
+            sdp: answer,
+          });
 
-        await flushPendingCandidates();
-
-        const answer =
-          await getService().createAnswer();
-
-        socket.emit(SOCKET_EVENTS.ANSWER, {
-          roomId,
-          targetUserId: fromUserId,
-          sdp: answer,
-        });
-      } catch (error) {
-        console.error(error);
-      }
-    };
-
-    const onAnswer = async ({ sdp }: any) => {
-      try {
-        console.log('Answer received');
-
-        await getService().setRemoteDescription(
-          sdp,
-        );
-
-        remoteDescSetRef.current = true;
-
-        await flushPendingCandidates();
-      } catch (error) {
-        console.error(error);
-      }
-    };
-
-    const onIceCandidate = async ({
-      candidate,
-    }: any) => {
-      try {
-        if (remoteDescSetRef.current) {
-          await getService().addIceCandidate(
-            candidate,
-          );
-        } else {
-          pendingCandidatesRef.current.push(
-            candidate,
-          );
+          console.log('Answer sent');
+        } catch (error) {
+          console.error(error);
         }
-      } catch (error) {
-        console.error(error);
-      }
-    };
+      },
+    );
 
-    const onCallEnded = () => {
-      serviceRef.current?.close();
+    socket.on(
+      SOCKET_EVENTS.ANSWER,
+      async ({ sdp }: any) => {
+        try {
+          console.log('Answer received');
 
-      serviceRef.current = null;
+          if (!pcRef.current) return;
 
-      remoteStreamRef.current = new MediaStream();
+          await pcRef.current.setRemoteDescription(
+            sdp,
+          );
 
-      pendingCandidatesRef.current = [];
-
-      remoteDescSetRef.current = false;
-
-      setRemoteStream(null);
-
-      reset();
-    };
-
-    socket.on(SOCKET_EVENTS.OFFER, onOffer);
-
-    socket.on(SOCKET_EVENTS.ANSWER, onAnswer);
+          console.log(
+            'Remote answer applied',
+          );
+        } catch (error) {
+          console.error(error);
+        }
+      },
+    );
 
     socket.on(
       SOCKET_EVENTS.ICE_CANDIDATE,
-      onIceCandidate,
+      async ({ candidate }: any) => {
+        try {
+          if (!pcRef.current) return;
+
+          await pcRef.current.addIceCandidate(
+            candidate,
+          );
+        } catch (error) {
+          console.error(error);
+        }
+      },
     );
 
     socket.on(
       SOCKET_EVENTS.CALL_ENDED,
-      onCallEnded,
-    );
+      () => {
+        pcRef.current?.close();
 
-    socket.on(
-      SOCKET_EVENTS.USER_DISCONNECTED,
-      onCallEnded,
+        pcRef.current = null;
+
+        remoteStreamRef.current =
+          new MediaStream();
+
+        setRemoteStream(null);
+
+        reset();
+      },
     );
 
     return () => {
-      socket.off(SOCKET_EVENTS.OFFER, onOffer);
+      socket.off(SOCKET_EVENTS.OFFER);
 
-      socket.off(SOCKET_EVENTS.ANSWER, onAnswer);
+      socket.off(SOCKET_EVENTS.ANSWER);
 
       socket.off(
         SOCKET_EVENTS.ICE_CANDIDATE,
-        onIceCandidate,
       );
 
       socket.off(
         SOCKET_EVENTS.CALL_ENDED,
-        onCallEnded,
-      );
-
-      socket.off(
-        SOCKET_EVENTS.USER_DISCONNECTED,
-        onCallEnded,
       );
     };
   }, [
     roomId,
     createPeerConnection,
-    flushPendingCandidates,
-    getService,
     reset,
     setRemotePeerId,
     setRemoteStream,
-    setStatus,
   ]);
 
   const hangUp = useCallback(() => {
@@ -328,26 +276,17 @@ export function useWebRTC(
       roomId,
     });
 
-    serviceRef.current?.close();
+    pcRef.current?.close();
 
-    serviceRef.current = null;
+    pcRef.current = null;
 
-    pendingCandidatesRef.current = [];
-
-    remoteDescSetRef.current = false;
-
-    remoteStreamRef.current = new MediaStream();
+    remoteStreamRef.current =
+      new MediaStream();
 
     setRemoteStream(null);
 
     reset();
   }, [roomId, reset, setRemoteStream]);
-
-  useEffect(() => {
-    return () => {
-      serviceRef.current?.close();
-    };
-  }, []);
 
   return {
     initiateCall,
