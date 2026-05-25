@@ -70,9 +70,9 @@ export default function RoomPage() {
   };
 
   const statusBadge = {
-    idle: <Badge>Idle</Badge>,
-    connecting: <Badge variant="warning">Connecting...</Badge>,
-    connected: <Badge variant="success">Connected</Badge>,
+    idle: <Badge variant="success">Connected</Badge>,
+    connecting: <Badge variant="warning">Calling...</Badge>,
+    connected: <Badge variant="success">In Call</Badge>,
     disconnected: <Badge variant="danger">Disconnected</Badge>,
     error: <Badge variant="danger">Error</Badge>,
   }[status];
