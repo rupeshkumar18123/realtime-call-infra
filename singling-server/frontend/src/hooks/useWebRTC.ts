@@ -109,9 +109,16 @@ export function useWebRTC(
       const stream =
         await getOrCreateLocalStream();
 
-      stream.getTracks().forEach((track) => {
-        service.addTrack(track, stream);
-      });
+      // stream.getTracks().forEach((track) => {
+      //   service.addTrack(track, stream);
+      // });
+
+
+      stream
+  .getTracks()
+  .forEach((track: MediaStreamTrack) => {
+    service.addTrack(track, stream);
+  });
 
       return service;
     },
