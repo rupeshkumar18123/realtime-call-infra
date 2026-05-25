@@ -1,0 +1,23 @@
+{
+  "entry": ["src/server.ts"],
+  "format": ["cjs"],
+  "target": "node18",
+  "outDir": "dist",
+  "clean": true,
+  "sourcemap": true,
+  "minify": false,
+  "splitting": false,
+  "dts": false,
+  "paths": {
+    "@/*": ["./src/*"],
+    "@config/*": ["./src/config/*"],
+    "@core/*": ["./src/core/*"],
+    "@modules/*": ["./src/modules/*"],
+    "@sockets/*": ["./src/sockets/*"],
+    "@middleware/*": ["./src/middleware/*"],
+    "@utils/*": ["./src/utils/*"],
+    "@types/*": ["./src/types/*"],
+    "@logger/*": ["./src/logger/*"],
+    "@infrastructure/*": ["./src/infrastructure/*"]
+  }
+}
