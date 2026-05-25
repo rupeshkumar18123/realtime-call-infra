@@ -65,7 +65,6 @@
 
 
 
-
 const ICE_SERVERS: RTCIceServer[] = [
   {
     urls: 'stun:stun.l.google.com:19302',
@@ -101,24 +100,31 @@ export class WebRTCService {
     this.pc.onicecandidate = ({ candidate }) => {
       if (candidate) {
         console.log('Generated ICE candidate');
+
         onIceCandidate(candidate);
       }
     };
 
     this.pc.ontrack = (event) => {
-      console.log('Remote track received:', event.track.kind);
+      console.log(
+        'Remote track received:',
+        event.track.kind,
+      );
+
       onTrack(event);
     };
 
     this.pc.onconnectionstatechange = () => {
-      if (this.pc) {
-        console.log(
-          'Connection State:',
-          this.pc.connectionState,
-        );
+      if (!this.pc) return;
 
-        onConnectionStateChange(this.pc.connectionState);
-      }
+      console.log(
+        'Peer connection state:',
+        this.pc.connectionState,
+      );
+
+      onConnectionStateChange(
+        this.pc.connectionState,
+      );
     };
 
     this.pc.oniceconnectionstatechange = () => {
@@ -142,16 +148,25 @@ export class WebRTCService {
     return this.pc;
   }
 
-  addStream(stream: MediaStream): void {
+  addTrack(
+    track: MediaStreamTrack,
+    stream: MediaStream,
+  ): void {
     if (!this.pc) {
       console.error('PeerConnection not initialized');
       return;
     }
 
-    stream.getTracks().forEach((track) => {
-      console.log('Adding local track:', track.kind);
+    console.log('Adding track:', track.kind);
 
-      this.pc?.addTrack(track, stream);
+    this.pc.addTrack(track, stream);
+  }
+
+  addStream(stream: MediaStream): void {
+    if (!this.pc) return;
+
+    stream.getTracks().forEach((track) => {
+      this.addTrack(track, stream);
     });
   }
 
@@ -197,16 +212,13 @@ export class WebRTCService {
       new RTCSessionDescription(sdp),
     );
 
-    console.log('Remote description applied');
+    console.log('Remote description set');
   }
 
   async addIceCandidate(
     candidate: RTCIceCandidateInit,
   ): Promise<void> {
-    if (!this.pc) {
-      console.error('PeerConnection not initialized');
-      return;
-    }
+    if (!this.pc) return;
 
     try {
       await this.pc.addIceCandidate(
@@ -215,7 +227,10 @@ export class WebRTCService {
 
       console.log('ICE candidate added');
     } catch (error) {
-      console.error('Failed to add ICE candidate:', error);
+      console.error(
+        'Failed to add ICE candidate:',
+        error,
+      );
     }
   }
 
